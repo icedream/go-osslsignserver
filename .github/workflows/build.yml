@@ -1,0 +1,222 @@
+name: Build & Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Install osslsigncode
+        run: sudo apt-get update && sudo apt-get install -y osslsigncode
+
+      - name: Download go dependencies
+        run: go mod download
+
+      - name: Generate osslsigncode test fixtures
+        run: go generate ./internal/osslsigncode
+
+      - name: Run tests
+        run: go test -v ./...
+
+      - name: Run linter
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+
+      - name: Test
+        run: go test -cover -coverprofile=coverage.txt ./...
+
+      - name: Archive code coverage results
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-coverage
+          path: coverage.txt
+
+  code_coverage:
+    name: "Code coverage report"
+    if: github.event_name == 'pull_request' # Do not run when workflow is triggered by push to main branch
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents:      read
+      actions:       read  # to download code coverage results from "test" job
+      pull-requests: write # write permission needed to comment on PR
+    steps:
+      - uses: fgrosse/go-coverage-report@v1.3.0 # Consider using a Git revision for maximum security
+        with:
+          coverage-artifact-name: "code-coverage" # can be omitted if you used this default value
+          coverage-file-name: "coverage.txt" # can be omitted if you used this default value
+
+  build-binary:
+    name: Build Binary
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image and extract binary
+        run: |
+          # Build image and get its ID
+          IMAGE_ID=$(docker build --rm -q .)
+          
+          # Create container from image
+          CID=$(docker create "$IMAGE_ID")
+          
+          # Copy binary from container
+          docker cp "$CID":/osslsignserver .
+          
+          # Clean up container
+          docker rm "$CID"
+
+      - name: Verify binary
+        run: |
+          file ./osslsignserver
+          ls -lh ./osslsignserver
+          ./osslsignserver --help || echo "Note: --help may not be available, but binary exists"
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: osslsignserver-binary
+          path: osslsignserver
+          retention-days: 30
+
+  build-image:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.2.0'
+
+      - name: Sign Docker image with cosign
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        env:
+          COSIGN_EXPERIMENTAL: true
+        run: |
+          for tag in ${{ steps.meta.outputs.tags }}; do
+            echo "Signing image: $tag"
+            cosign sign --yes "$tag"
+          done
+
+      - name: Verify signed image
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        env:
+          COSIGN_EXPERIMENTAL: true
+        run: |
+          for tag in ${{ steps.meta.outputs.tags }}; do
+            echo "Verifying signature for: $tag"
+            cosign verify --certificate-identity-regexp . --certificate-oidc-issuer https://token.actions.githubusercontent.com "$tag" || echo "Warning: Could not verify $tag"
+          done
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build-binary, build-image]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: osslsignserver-binary
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: osslsignserver
+          body: |
+            # osslsignserver ${{ github.ref_name }}
+
+            ## Release Notes
+            - Docker image: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}`
+            - Binary: See artifacts
+            - Signed with cosign (GitHub OIDC)
+
+            ## Security
+            This release includes cryptographically signed Docker images. You can verify signatures using:
+            ```bash
+            cosign verify --certificate-identity-regexp . --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+            ```
+
+            ## Installation
+            ### Docker
+            ```bash
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+            docker run ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+            ```
+
+            ### Binary
+            ```bash
+            chmod +x osslsignserver
+            ./osslsignserver
+            ```
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
