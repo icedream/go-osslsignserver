@@ -42,6 +42,16 @@
       ],
       "depNameTemplate": "go",
       "datasourceTemplate": "golang-version"
+    },
+    {
+      "fileMatch": [
+        "^\\.github/workflows/.*\\.ya?ml$"
+      ],
+      "matchStrings": [
+        "golangci-lint-action@v(?<currentValue>[0-9]+(?:\\.[0-9]+){1,2})"
+      ],
+      "depNameTemplate": "golangci/golangci-lint",
+      "datasourceTemplate": "github-releases"
     }
   ],
   "schedule": [
