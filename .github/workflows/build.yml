@@ -138,6 +138,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
+        id: build-and-push
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -155,12 +156,10 @@ jobs:
       - name: Sign Docker image with cosign
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         env:
-          COSIGN_EXPERIMENTAL: true
-        run: |
-          for tag in ${{ steps.meta.outputs.tags }}; do
-            echo "Signing image: $tag"
-            cosign sign --yes "$tag"
-          done
+          # https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-an-intermediate-environment-variable
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build-and-push.outputs.digest }}
+        run: echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}
 
       - name: Verify signed image
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
