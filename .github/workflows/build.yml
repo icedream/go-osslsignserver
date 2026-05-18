@@ -151,7 +151,7 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@v4.1.2
         with:
-          cosign-release: 'v2.2.0'
+          cosign-release: 'v3.0.6'
 
       - name: Sign Docker image with cosign
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
