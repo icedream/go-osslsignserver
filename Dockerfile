@@ -1,7 +1,7 @@
 ###
 # BUILD BASE
 
-FROM debian:trixie-20260505 AS runtime-base
+FROM debian:trixie-20260518 AS runtime-base
 
 FROM golang:1.26-trixie AS build-base
 WORKDIR /usr/src/osslsignserver
