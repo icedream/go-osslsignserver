@@ -41,10 +41,8 @@ func NewService(cfg *config.Config, executor osslsigncode.ExecutorIface, profile
 
 // Sign performs the signing operation for a given profile.
 func (s *Service) Sign(ctx context.Context, profileID string, artifactReader io.Reader, artifactSize int64, hash *string, description *string, descriptionURL *string) ([]byte, error) {
-	// Handle optional hash, description, and descriptionURL parameters
+	// Handle optional hash parameter (currently unused)
 	_ = hash
-	_ = description
-	_ = descriptionURL
 	_ = artifactSize // Placeholder for future use
 
 	profile, ok := s.profiles[profileID]
@@ -108,6 +106,14 @@ func (s *Service) Sign(ctx context.Context, profileID string, artifactReader io.
 	opts.InputFile = inputPath
 	outputPath := filepath.Join(jobDir, "output")
 	opts.OutputFile = outputPath
+
+	// Override description and description URL if provided
+	if description != nil && *description != "" {
+		opts.Description = *description
+	}
+	if descriptionURL != nil && *descriptionURL != "" {
+		opts.DescriptionURL = *descriptionURL
+	}
 
 	// Get password from provider
 	var extraFiles []*os.File

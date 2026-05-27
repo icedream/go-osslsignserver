@@ -124,10 +124,23 @@ func Sign(c *gin.Context) {
 		return
 	}
 
-	// Get optional parameters (currently unused)
-	_ = c.PostForm("hash")
-	_ = c.PostForm("description")
-	_ = c.PostForm("description_url")
+	// Get optional parameters
+	hash := c.PostForm("hash")
+	description := c.PostForm("description")
+	descriptionURL := c.PostForm("description_url")
+
+	var hashPtr *string
+	if hash != "" {
+		hashPtr = &hash
+	}
+	var descriptionPtr *string
+	if description != "" {
+		descriptionPtr = &description
+	}
+	var descriptionURLPtr *string
+	if descriptionURL != "" {
+		descriptionURLPtr = &descriptionURL
+	}
 
 	// Perform signing with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -138,9 +151,9 @@ func Sign(c *gin.Context) {
 		profileID,
 		file,
 		header.Size,
-		nil,
-		nil,
-		nil,
+		hashPtr,
+		descriptionPtr,
+		descriptionURLPtr,
 	)
 	switch {
 	case err == signing.ErrProfileNotFound:

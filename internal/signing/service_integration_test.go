@@ -610,3 +610,142 @@ func TestSign_ConcurrentDifferentProfiles(t *testing.T) {
 	cancel1()
 	<-done
 }
+
+// TestSign_DescriptionOverride tests that passed-in description and description_url
+// override the profile defaults in the signing options.
+func TestSign_DescriptionOverride(t *testing.T) {
+	testData := []byte("test file content")
+
+	// Create a profile with default description
+	profileDesc := "Profile default description"
+	profileDescURL := "https://profile.example.com"
+
+	profs := map[string]*profiles.SignProfile{
+		"test": {
+			Certificate:      osslsigncode.FileCertificate{Certs: "/fake/cert.pem", Key: "/fake/key.pem"},
+			PasswordProvider: &mockPasswordProvider{password: "pin"},
+			Description:      &profileDesc,
+			DescriptionURL:   &profileDescURL,
+		},
+	}
+
+	cfg := &config.Config{
+		WorkDir:               t.TempDir(),
+		MaxConcurrentRequests: 1,
+	}
+
+	exec := &mockExecutor{}
+	service := NewService(cfg, exec, profs)
+
+	// Pass different description values in the request
+	requestDesc := "Request override description"
+	requestDescURL := "https://request.example.com"
+
+	result, err := service.Sign(
+		context.Background(),
+		"test",
+		bytes.NewReader(testData),
+		int64(len(testData)),
+		nil,
+		&requestDesc,
+		&requestDescURL,
+	)
+
+	require.NoError(t, err)
+	assert.NotNil(t, result)
+
+	// Verify the request values overrode the profile defaults
+	assert.Equal(t, requestDesc, exec.lastOpts.Description, "description should be overridden")
+	assert.Equal(t, requestDescURL, exec.lastOpts.DescriptionURL, "description_url should be overridden")
+}
+
+// TestSign_DescriptionProfileDefault tests that profile defaults are used
+// when no description is passed in the request.
+func TestSign_DescriptionProfileDefault(t *testing.T) {
+	testData := []byte("test file content")
+
+	// Create a profile with default description
+	profileDesc := "Profile default description"
+	profileDescURL := "https://profile.example.com"
+
+	profs := map[string]*profiles.SignProfile{
+		"test": {
+			Certificate:      osslsigncode.FileCertificate{Certs: "/fake/cert.pem", Key: "/fake/key.pem"},
+			PasswordProvider: &mockPasswordProvider{password: "pin"},
+			Description:      &profileDesc,
+			DescriptionURL:   &profileDescURL,
+		},
+	}
+
+	cfg := &config.Config{
+		WorkDir:               t.TempDir(),
+		MaxConcurrentRequests: 1,
+	}
+
+	exec := &mockExecutor{}
+	service := NewService(cfg, exec, profs)
+
+	// Don't pass description values in the request
+	result, err := service.Sign(
+		context.Background(),
+		"test",
+		bytes.NewReader(testData),
+		int64(len(testData)),
+		nil,
+		nil,
+		nil,
+	)
+
+	require.NoError(t, err)
+	assert.NotNil(t, result)
+
+	// Verify the profile defaults are used
+	assert.Equal(t, profileDesc, exec.lastOpts.Description, "profile default description should be used")
+	assert.Equal(t, profileDescURL, exec.lastOpts.DescriptionURL, "profile default description_url should be used")
+}
+
+// TestSign_PartialDescriptionOverride tests that we can override just description
+// or just description_url while preserving profile defaults for the other field.
+func TestSign_PartialDescriptionOverride(t *testing.T) {
+	testData := []byte("test file content")
+
+	profileDesc := "Profile description"
+	profileDescURL := "https://profile.example.com"
+
+	profs := map[string]*profiles.SignProfile{
+		"test": {
+			Certificate:      osslsigncode.FileCertificate{Certs: "/fake/cert.pem", Key: "/fake/key.pem"},
+			PasswordProvider: &mockPasswordProvider{password: "pin"},
+			Description:      &profileDesc,
+			DescriptionURL:   &profileDescURL,
+		},
+	}
+
+	cfg := &config.Config{
+		WorkDir:               t.TempDir(),
+		MaxConcurrentRequests: 1,
+	}
+
+	exec := &mockExecutor{}
+	service := NewService(cfg, exec, profs)
+
+	// Override only description, not description_url
+	requestDesc := "Request override description"
+
+	result, err := service.Sign(
+		context.Background(),
+		"test",
+		bytes.NewReader(testData),
+		int64(len(testData)),
+		nil,
+		&requestDesc,
+		nil,
+	)
+
+	require.NoError(t, err)
+	assert.NotNil(t, result)
+
+	// Verify description was overridden but description_url remains default
+	assert.Equal(t, requestDesc, exec.lastOpts.Description, "description should be overridden")
+	assert.Equal(t, profileDescURL, exec.lastOpts.DescriptionURL, "description_url should remain profile default")
+}
