@@ -188,15 +188,17 @@ jobs:
         with:
           name: osslsignserver-binary
 
+      - name: Strip v prefix from tag
+        id: version
+        run: echo "tag=$(echo ${{ github.ref_name }} | sed 's/^v//')" >> $GITHUB_OUTPUT
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           files: osslsignserver
           body: |
-            # osslsignserver ${{ github.ref_name }}
-
             ## Release Notes
-            - Docker image: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}`
+            - Docker image: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag }}`
             - Binary: See artifacts
             - Signed with cosign (GitHub OIDC)
 
@@ -204,14 +206,14 @@ jobs:
             This release includes cryptographically signed Docker images. You can verify signatures using:
             ```bash
             cosign verify --certificate-identity-regexp . --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag }}
             ```
 
             ## Installation
             ### Docker
             ```bash
-            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-            docker run ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag }}
+            docker run ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag }}
             ```
 
             ### Binary
