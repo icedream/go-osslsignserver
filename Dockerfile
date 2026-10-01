@@ -3,7 +3,7 @@
 
 FROM debian:trixie-20260518 AS runtime-base
 
-FROM golang:1.26-trixie AS build-base
+FROM golang:1.27-trixie AS build-base
 WORKDIR /usr/src/osslsignserver
 
 ###
